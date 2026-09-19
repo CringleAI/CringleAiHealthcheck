@@ -1,0 +1,2 @@
+# CringleAiHealthcheck
+System health check
