@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""CringleAI System Health Check — a dependency-free Mac/Linux status report."""
+
+import json
+import os
+import platform
+import shutil
+import socket
+import subprocess
+from datetime import datetime, timezone
+
+
+def uptime_seconds():
+    """Return system uptime where the operating system exposes it."""
+    try:
+        if os.path.exists("/proc/uptime"):
+            with open("/proc/uptime", encoding="utf-8") as uptime_file:
+                return round(float(uptime_file.read().split()[0]))
+
+        if platform.system() == "Darwin":
+            boot_time = subprocess.check_output(
+                ["sysctl", "-n", "kern.boottime"], text=True
+            )
+            # Example: { sec = 1710000000, usec = 0 } Tue Mar  9 12:00:00 2024
+            seconds = int(boot_time.split("sec = ")[1].split(",")[0])
+            return round(datetime.now(timezone.utc).timestamp() - seconds)
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def health_status(percent_used):
+    if percent_used >= 95:
+        return "critical"
+    if percent_used >= 85:
+        return "warning"
+    return "healthy"
+
+
+def main():
+    disk = shutil.disk_usage("/")
+    disk_used_percent = round((disk.used / disk.total) * 100, 1)
+
+    report = {
+        "project": "CringleAI System Health Check",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "host": socket.gethostname(),
+        "operating_system": f"{platform.system()} {platform.release()}",
+        "architecture": platform.machine(),
+        "uptime_seconds": uptime_seconds(),
+        "disk": {
+            "path": "/",
+            "total_gb": round(disk.total / (1024 ** 3), 2),
+            "used_gb": round(disk.used / (1024 ** 3), 2),
+            "free_gb": round(disk.free / (1024 ** 3), 2),
+            "used_percent": disk_used_percent,
+        },
+        "status": health_status(disk_used_percent),
+    }
+
+    try:
+        load_1m, load_5m, load_15m = os.getloadavg()
+        report["load_average"] = {
+            "1_minute": round(load_1m, 2),
+            "5_minutes": round(load_5m, 2),
+            "15_minutes": round(load_15m, 2),
+        }
+    except (AttributeError, OSError):
+        report["load_average"] = "unavailable on this operating system"
+
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == "__main__":
+    main()
